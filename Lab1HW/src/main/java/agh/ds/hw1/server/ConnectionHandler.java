@@ -1,27 +1,29 @@
-package agh.ds.hw1;
+package agh.ds.hw1.server;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
-import java.net.Socket;
+import java.net.*;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Objects;
 
 public class ConnectionHandler implements Runnable {
     private static final ArrayList<ConnectionHandler> ConnectionsList = new ArrayList<>();
-    private Socket client;
+    private Socket tcpSocket;
     private BufferedReader in;
     private PrintWriter out;
     private String nick;
-    private boolean active = true;
+    private DatagramSocket datagramSocket;
 
-    public ConnectionHandler(Socket client) throws IOException {
+    public ConnectionHandler(Socket client, DatagramSocket datagramSocket) throws IOException {
         try {
-            this.client = client;
+            this.tcpSocket = client;
             this.out = new PrintWriter(client.getOutputStream(), true);
             this.in = new BufferedReader(new InputStreamReader(client.getInputStream()));
-
+            this.datagramSocket = datagramSocket;
         } catch (IOException e) {
             e.printStackTrace();
             ShutDown();
@@ -68,13 +70,16 @@ public class ConnectionHandler implements Runnable {
     public void run() {
         try {
             AskForNickname();
-            while (client.isConnected()) {
+            Thread udpListener = UPDListener();
+            udpListener.start();
+            while (tcpSocket.isConnected()) {
                 String message;
                 message = this.in.readLine();
                 HandleMessage(message);
             }
         } catch (IOException e) {
             try {
+                boolean active = true;
                 if (active) {
                     ShutDown();
                 }
@@ -83,16 +88,56 @@ public class ConnectionHandler implements Runnable {
         }
     }
 
-    private void HandleMessage(String message) throws IOException {
-        if (message.equals("q")) {
-            active = false;
-            ShutDown();
+    private Thread UPDListener() {
+        return new Thread(() -> {
+            try{
+                byte[] receiveBuffer = new byte[1024];
+
+                while(true) {
+                    Arrays.fill(receiveBuffer, (byte)0);
+                    DatagramPacket receivePacket = new DatagramPacket(receiveBuffer, receiveBuffer.length);
+                    datagramSocket.receive(receivePacket);
+                    String message = new String(receivePacket.getData());
+                    int senderPort = receivePacket.getPort();
+                    Server.UsersUdpPorts.add(senderPort);
+                    if (!message.equals("INIT"))
+                        UDPBroadcast(message, receivePacket.getAddress(), senderPort);
+                }
+            }
+            catch(Exception e){
+                e.printStackTrace();
+            }
+            finally {
+                if (datagramSocket != null) {
+                    datagramSocket.close();
+                }
+            }
+        });
+    }
+
+    private void UDPBroadcast(String message, InetAddress address, int senderPort) {
+        if (message.isBlank())
+            return;
+
+        byte[] sendBuffer = message.getBytes(StandardCharsets.UTF_8);
+        for (Integer port : Server.UsersUdpPorts) {
+            if (port != senderPort) {
+                DatagramPacket sendPacket = new DatagramPacket(sendBuffer, sendBuffer.length, address, port);
+                try {
+                    datagramSocket.send(sendPacket);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
         }
-        else if (message.equals("l")) {
+    }
+
+    private void HandleMessage(String message) throws IOException {
+        if (message.equals("l")) {
             ListActiveUsers();
         }
         else {
-            BroadcastToAll(message);
+            TCPBroadcast(message);
         }
     }
 
@@ -105,7 +150,7 @@ public class ConnectionHandler implements Runnable {
         this.out.println(builder.toString());
     }
 
-    private void BroadcastToAll(String s) {
+    private void TCPBroadcast(String s) {
         for (ConnectionHandler handler : ConnectionsList) {
             if (!Objects.equals(handler.nick, this.nick)) {
                 handler.out.println(this.nick + ": " + s);
@@ -115,9 +160,7 @@ public class ConnectionHandler implements Runnable {
 
     private void ServerInformation(String s) {
         for (ConnectionHandler handler : ConnectionsList) {
-            if (!Objects.equals(handler.nick, this.nick)) {
                 handler.out.println("SERVER: " + s);
-            }
         }
     }
 
@@ -126,8 +169,8 @@ public class ConnectionHandler implements Runnable {
             this.in.close();
         if (this.out != null)
             this.out.close();
-        if (this.client != null && !this.client.isClosed())
-            this.client.close();
+        if (this.tcpSocket != null && !this.tcpSocket.isClosed())
+            this.tcpSocket.close();
         RemoveConnection();
     }
 
