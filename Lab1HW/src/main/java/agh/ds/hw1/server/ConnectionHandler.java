@@ -15,7 +15,7 @@ public class ConnectionHandler implements Runnable {
     private Socket tcpSocket;
     private BufferedReader in;
     private PrintWriter out;
-    private String nick;
+    private String nick = "Anonymous";
     private DatagramSocket datagramSocket;
 
     public ConnectionHandler(Socket client, DatagramSocket datagramSocket) throws IOException {
@@ -40,7 +40,8 @@ public class ConnectionHandler implements Runnable {
                 this.nick = temporaryNick;
                 ConnectionsList.add(this);
                 System.out.println(nick + " entered a chat");
-                ServerInformation(this.nick + " entered a chat");
+                TCPBroadcast(" ENTERED A CHAT");
+                this.out.println("NICK: " + this.nick);
             }
             else {
                 this.out.println("SERVER: " + validationMessage);
@@ -100,7 +101,7 @@ public class ConnectionHandler implements Runnable {
                     String message = new String(receivePacket.getData());
                     int senderPort = receivePacket.getPort();
                     Server.UsersUdpPorts.add(senderPort);
-                    if (!message.equals("INIT"))
+                    if (!message.startsWith("INIT"))
                         UDPBroadcast(message, receivePacket.getAddress(), senderPort);
                 }
             }
@@ -116,10 +117,12 @@ public class ConnectionHandler implements Runnable {
     }
 
     private void UDPBroadcast(String message, InetAddress address, int senderPort) {
-        if (message.isBlank())
-            return;
+        System.out.println(this.nick + ": send an image");
+        String str = this.nick + ": " +
+                message +
+                "\n";
 
-        byte[] sendBuffer = message.getBytes(StandardCharsets.UTF_8);
+        byte[] sendBuffer = str.getBytes(StandardCharsets.UTF_8);
         for (Integer port : Server.UsersUdpPorts) {
             if (port != senderPort) {
                 DatagramPacket sendPacket = new DatagramPacket(sendBuffer, sendBuffer.length, address, port);

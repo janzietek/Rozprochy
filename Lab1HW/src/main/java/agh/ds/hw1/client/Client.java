@@ -13,28 +13,34 @@ public class Client {
     private Socket socket;
     private BufferedReader in;
     private PrintWriter out;
-    private boolean active = true;
 
+    private boolean active = true;
+    private boolean nickAccepted = false;
+
+    private String nick;
     private int PORT = 12345;
 
     private DatagramSocket datagramSocket;
     private InetAddress address;
 
-    private InetAddress MulticastGroup;
+    private InetSocketAddress MulticastGroup;
     private MulticastSocket multicastSocket;
 
     public Client() throws IOException {
         try {
             datagramSocket = new DatagramSocket();
             address = InetAddress.getByName("localhost");
+
             socket = new Socket(InetAddress.getLocalHost(), PORT);
             out = new PrintWriter(socket.getOutputStream(), true);
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
+            this.multicastSocket = new MulticastSocket(6789);
+            InetAddress mcastaddr = InetAddress.getByName("228.5.6.7");
+            MulticastGroup = new InetSocketAddress(mcastaddr, 6789);
+            NetworkInterface netIf = NetworkInterface.getByName("bge0");
 
-            multicastSocket = new MulticastSocket(PORT);
-            MulticastGroup = InetAddress.getByName("228.5.6.7");
-            multicastSocket.joinGroup(MulticastGroup);
+            multicastSocket.joinGroup(new InetSocketAddress(mcastaddr, 0), netIf);
 
             // Init UDP
             SendUPDMessage("INIT");
@@ -49,7 +55,15 @@ public class Client {
             while (active) {
                 try {
                     String message = this.in.readLine();
-                    System.out.println(message);
+                    if (message.startsWith("NICK")) {
+                        String[] temp = message.split(" ");
+                        this.nick = temp[1];
+                        System.out.println("Your nick <" + nick + "> was accepted");
+                        this.nickAccepted = true;
+                    }
+                    else {
+                        System.out.println(message);
+                    }
 
                 } catch (IOException e) {
                     e.printStackTrace();
@@ -81,11 +95,15 @@ public class Client {
             byte[] receiveBuffer = new byte[1024];
             while (true) {
                 try {
-                    Arrays.fill(receiveBuffer, (byte) 0);
-                    DatagramPacket receivePacket = new DatagramPacket(receiveBuffer, receiveBuffer.length);
-                    multicastSocket.receive(receivePacket);
-                    String message = new String(receivePacket.getData());
-                    System.out.println(message);
+                    if (this.multicastSocket != null) {
+                        Arrays.fill(receiveBuffer, (byte) 0);
+                        DatagramPacket receivePacket = new DatagramPacket(receiveBuffer, receiveBuffer.length);
+                        this.multicastSocket.receive(receivePacket);
+                        String message = new String(receivePacket.getData());
+                        if (!message.startsWith(this.nick)) {
+                            System.out.println(message);
+                        }
+                    }
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
@@ -130,8 +148,11 @@ public class Client {
     }
 
     private void SendMulticastMessage(String message) {
-        byte[] sendBuff = message.getBytes();
-        DatagramPacket sendPacket = new DatagramPacket(sendBuff, sendBuff.length, MulticastGroup, PORT);
+        String str = this.nick + ": " +
+                message +
+                "\n";
+        byte[] sendBuff = str.getBytes();
+        DatagramPacket sendPacket = new DatagramPacket(sendBuff, sendBuff.length, MulticastGroup);
         try {
             datagramSocket.send(sendPacket);
         } catch (IOException e) {
